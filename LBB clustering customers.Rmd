@@ -1,0 +1,369 @@
+---
+title: "Unsupervised learning - clustering produk supermarket"
+author: "ReniSulastri"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+    theme: united
+    highlight: zenburn
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyr)
+library(GGally)
+library(gridExtra)
+library(factoextra)
+library(FactoMineR)
+library(plotly)
+```
+
+## Tujuan
+
+Tujuan LBB ini adalah untuk memahami *unsupervised learning* pada konteks *Dimensionality Reduction* dan *clustering* . Dengan *Dimensionality Reduction* kita dapat mengurangi dimensi/variable pada data yang kita miliki dengan tetap mempertahankan informasi-informasi yang berguna.
+
+Idealnya untuk PCA ini menggunakan data dengan dimensi banyak. Awalnya saya ingin menggunakan data **spotify track** yang disediakan oleh `kaggle.com`, namun ternyata memakan waktu yang sangat lama pada proses PCA, karena data terdiri atas ratusan ribu baris. Setelah submit LBB ini, saya akan coba lagi PCA dengan jumlah data yang lebih sedikit, namun dimensi yang banyak. Atau menggunakan processor pada `google cloud`
+
+## Data preparation
+
+Read data
+```{r}
+library(dplyr)
+penjualan <- read.csv("wholesale.csv")
+dim(penjualan)
+str(penjualan)
+head(penjualan)
+```
+
+```{r}
+names(penjualan)
+```
+
+## Data Cleansing
+Kita akan membuang kolom-kolom yang tidak relevan dengan kebutuhan unsupervised learning, dan mengubah tipe-tipe data yang dirasa kurang tepat.
+
+**Kolom yang akan dibuang**: NA
+
+**Kolom yang akan diubah**: 
+
+1. dari chr menjadi factor: NA
+
+2. dari int menjadi factor, yaitu: Channel, Region
+
+```{r}
+# mengubah type data
+penjualan_clean <- penjualan %>% 
+  mutate(Channel = as.factor(Channel),
+         Region= as.factor(Region)) 
+head(penjualan_clean)
+```
+
+## Exploratory data analysis
+
+**Check missing value**
+
+```{r}
+anyNA(penjualan_clean)
+is.na(penjualan_clean)%>% colSums()
+```
+
+**korelasi sebelum PCA**
+
+```{r}
+library(GGally)
+ggcorr(penjualan_clean, label = T, hjust = 1, layout.exp = 2)
+```
+
+
+## Principal Component Analysis (PCA)
+
+**Memilih indeks kolom numerik dan kategorik secara dinamis**
+```{r}
+# nama kolom numerik (quantitative)
+quanti <- penjualan_clean %>% 
+  select_if(is.numeric) %>% 
+  colnames()
+quanti
+
+# indeks kolom numerik
+quantivar <- which(colnames(penjualan_clean) %in% quanti)
+quantivar
+
+# nama kolom kategorik (qualitative)
+quali <- penjualan_clean %>% 
+  select_if(is.factor) %>% 
+  colnames()
+quali
+
+# indeks kolom kategorik
+qualivar <- which(colnames(penjualan_clean) %in% quali)
+qualivar
+```
+### PCA dengan  `FactoMineR`
+```{r}
+library(FactoMineR)
+```
+
+```{r, fig.width=11}
+# melakukan PCA dengan FactoMineR
+penjualan_pca <- PCA(X = penjualan_clean,
+                scale.unit = T, 
+                quali.sup = qualivar, 
+                graph = F,
+                ncp = 6) # 10 kolom numerik 
+penjualan_pca
+# ekuivalen dengan prcomp(data, scale. = T)
+```
+
+
+```{r}
+# summary(prcomp_pca)
+penjualan_pca$eig
+```
+```{r}
+# cek nilai di tiap PC (proyeksi objek di sumbu pc yang baru)
+# ekuivalen dengan pca$x
+head(penjualan_pca$ind$coord)
+```
+```{r}
+#ekuivalen dengan eigen vector atau pca$rotation
+penjualan_pca$var$coord
+```
+
+
+### Visualisasi PCA
+
+**Visualisasi PCA menggunakan `plot.PCA()`:**
+
+#### Individual Factor Map
+```{r}
+# individual factor map
+plot.PCA(
+  x = penjualan_pca,
+  choix = "ind",
+  invisible = "quali",
+  select = "contrib 5",
+  habillage = "Channel"
+)
+```
+
+```{r}
+# individual factor map
+plot.PCA(
+  x = penjualan_pca,
+  choix = "ind",
+  invisible = "quali",
+  select = "contrib 5",
+  habillage = "Region"
+)
+```
+
+
+> fungsi individual plot mampu mengidentifikasi outliers
+
+
+#### Variables Factor Map
+
+```{r}
+# variables factor map
+plot.PCA(
+  x = penjualan_pca,
+  choix = "var"
+)
+```
+
+
+**Note**: persentase yang tampil pada sumbu Dim 1 (44.08%) dan Dim 2 (28.38%) menunjukkan seberapa besar sumbu merangkum informasi.
+
+## K-means Clustering
+
+K-means adalah salah satu algoritma *centroid-based* clustering, artinya tiap cluster memiliki satu centroid yang mewakili cluster tersebut.
+
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(100)
+
+# k-means dengan 3 cluster
+penjualan_km <- kmeans(x = penjualan_clean,
+                    centers = 3)
+```
+1. Banyaknya pengulangan (iterasi) algoritma k-means sampai dihasilkan cluster yang stabil
+
+```{r}
+penjualan_km$iter
+```
+2. Banyaknya observasi pada tiap cluster
+
+```{r}
+penjualan_km$size
+```
+
+3. Letak pusat cluster/centroid, biasa digunakan untuk profiling cluster 
+
+```{r}
+penjualan_km$centers
+```
+4. Label cluster untuk tiap observasi
+
+```{r}
+head(penjualan_km$cluster)
+```
+
+### Goodness of Fit
+Kebaikan hasil clustering dapat dilihat dari 3 nilai:
+
+- Within Sum of Squares (`$withinss`): jumlah jarak kuadrat dari tiap observasi ke centroid tiap cluster.
+- Between Sum of Squares (`$betweenss`): jumlah jarak kuadrat terbobot dari tiap centroid ke rata-rata global. Bobotnya berdasarkan banyaknya observasi pada cluster.
+- Total Sum of Squares (`$totss`): jumlah jarak kuadrat dari tiap observasi ke rata-rata global.
+
+```{r}
+# cek nilai WSS
+penjualan_km$withinss
+sum(penjualan_km$withinss)
+penjualan_km$tot.withinss
+```
+
+```{r}
+# cek rasio BSS/TSS
+penjualan_km$betweenss
+penjualan_km$totss
+
+penjualan_km$betweenss / penjualan_km$totss
+```
+> Nilai rasio antara BSS/TSS = Klaster kita masih kurang baik/optimal.
+
+Kriteria clustering yang "baik":
+
+- WSS semakin rendah: jarak observasi di satu kelompok yang sama semakin rendah, artinya tiap cluster memiliki karakteristik yang semakin mirip
+- Rasio BSS/TSS mendekati 1, karena kelompok hasil clustering semakin mewakili persebaran data yang sesungguhnya
+
+### Pemilihan nilai k optimum
+
+Semakin tinggi k, maka: 
+
+- WSS semakin mendekati 0
+- Rasio BSS/TSS mendekati 1 (BSS semakin mendekati nilai TSS)
+> akan tetapi k yang tinggi belum tentu adalah yang terbaik, karena bisa jadi 1 cluster isinya sangat sedikit data, sehingga tidak meaningful
+
+Kalau begitu apakah kita selalu memilih k = banyak observasi? Bagaimana menentukan k optimum?
+
+1. Kebutuhan dari segi bisnis, data dibutuhkan menjadi berapa kelompok; atau
+2. Secara statistik: Elbow method, visualisasi dengan `fviz_nbclust()` dari package `factoextra`
+
+
+```{r}
+fviz_nbclust(x = penjualan_clean,
+             FUNcluster = kmeans, # fungsi clustering
+             method = "wss") # within sum of square
+```
+
+Pilih nilai k di mana ketika k ditambah, penurunan Total WSS tidak terlalu drastis (atau dapat dikatakan sudah melandai).
+
+> Nilai k optimum dari data kita adalah k = 5. (yang pertama paling landai)
+
+Buat ulang k-means dengan k optimum:
+
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(100)
+
+# berdasarkan elbow method
+penjualan_km_opt <- kmeans(x = penjualan_clean,
+                        centers = 5)
+
+head(penjualan_km_opt$cluster)
+```
+
+### Interpretation: Cluster Profiling
+
+```{r}
+# membuat kolom baru berisi label cluster
+penjualan_clean$kelompok <- as.factor(penjualan_km_opt$cluster)
+
+# melakukan profiling cluster
+penjualan_centroid <- penjualan_clean %>% 
+  group_by(kelompok) %>% 
+  summarise_all(mean)
+# Sama saja dengan penjualan_km_opt$centers
+
+penjualan_centroid
+```
+```{r}
+# mempermudah profiling
+library(ggiraphExtra)
+ggRadar(data=penjualan_clean, 
+        aes(colour=kelompok), 
+        interactive=TRUE)
+```
+
+
+### Product Recommender
+
+Misal ada seorang pelanggan pecinta barang dari **list nomor 1** datang ke toko kita, namun stok barang tersebut sedang kosong. Kira-kira barang apa yang akan kita rekomendasikan?.
+Sayangnya untuk data `wholesale.csv` ini tidak ada label nama di setiap baris, sehingga agak sulit diaplikasikan.
+
+```{r}
+#penjualan_clean
+```
+
+
+```{r}
+penjualan_clean["1",]
+penjualan_clean["1", "kelompok"]
+```
+```{r}
+penjualan_clean[penjualan_clean$kelompok == 1, ]
+```
+> berdasarkan data di atas, maka kita bisa merekomendasikan barang-barang yang mirip sebagaimana list di atas, yaitu berada di cluster yang sama, yaitu kelompok 1
+
+## Bandingkan dengan hasil klasifikasi 
+
+**Tujuan**: membandingkan hasil clustering `k_means` dengan `logistic regression`
+
+```{r}
+library(dplyr)
+penjualan_klasifikasi <- read.csv("wholesale.csv")
+head(penjualan_klasifikasi)
+```
+```{r}
+# mengubah type data
+penjualan__klasifikasi_clean <- penjualan_klasifikasi %>% 
+  mutate(Channel = as.factor(Channel),
+         Region= as.factor(Region)) 
+head(penjualan__klasifikasi_clean)
+```
+
+```{r}
+anyNA(penjualan__klasifikasi_clean)
+is.na(penjualan__klasifikasi_clean)%>% colSums()
+```
+
+**Check class imbalance**
+
+```{r}
+table(penjualan__klasifikasi_clean$Channel)
+prop.table(table(penjualan__klasifikasi_clean$Channel))
+```
+> terdapat class imbalance pada kolom target
+
+- karena terdapat class imbalance, maka kita tidak disarankan untuk melakukan logistic regression dengan menggunakan data yang ada
+- Untuk itu perlu perbaikan data terlebih dahulu, supaya hasil komparasi clustering dengan k_means dan klasifikasi dengan logistic regression dapat dilakukan
+
+## Analisa PCA dan clustering
+1. Dengan melakukan PCA maka kita dapat mereduksi dimensi-dimensi yang tidak diperlukan, dengan tetap mempertahankan data yang ada
+2. Idealnya untuk PCA ini menggunakan data dengan dimensi banyak. Awalnya saya ingin menggunakan data **spotify track* yang disediakan oleh `kaggle.com`, namun ternyata memakan waktu yang sangat lama pada proses PCA, karena data terdiri atas ratusan ribu baris. Setelah submit LBB ini, saya akan coba lagi PCA dengan jumlah data yang lebih sedikit
+3. **K_means clustering** sangat membantu kita mengelompokkan data-data berdasarkan kemiripan-kemiripan sifat pada data-data tersebut.
+4. **Elbow method** membantu kita menemukan jumlah **K** yang optimum, karena semakin banyak **K** tidak menjamin bahwa **clustering** semakin ideal.
+4. **K_means clustering** membantu kita untuk merekomendasikan produk atau informasi yang sejenis kepada stakeholders
+
+
+## END
+
+
+
